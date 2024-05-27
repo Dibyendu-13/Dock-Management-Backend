@@ -11,12 +11,12 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:3000", // Adjust this to match your frontend's origin
+   
     methods: ["GET", "POST"]
   }
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT ='https://secret-castle-75015-b0147fa6ddd8.herokuapp.com/';
 
 app.use(bodyParser.json());
 app.use(cors());
