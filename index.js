@@ -219,7 +219,9 @@ app.post('/api/assign-dock', (req, res) => {
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
   res.status(200).json({ message: 'All docks are full or the vehicle is late, added to waiting list' });
 });
-
+app.get('/',(req,res)=>{
+    res.status(200).json({message:`Server is running fine at ${PORT}!`});
+})
 // Get dock status
 app.get('/api/dock-status', (req, res) => {
   res.status(200).json({ docks, waitingVehicles });
