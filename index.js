@@ -11,12 +11,13 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-   
+    origin: 'https://dock-mgmt.netlify.app/',
     methods: ["GET", "POST"]
   }
 });
 
-const PORT ='https://secret-castle-75015-b0147fa6ddd8.herokuapp.com/';
+
+const PORT =process.env.PORT || 5000;
 
 app.use(bodyParser.json());
 app.use(cors());
