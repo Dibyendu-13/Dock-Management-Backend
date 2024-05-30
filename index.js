@@ -19,10 +19,7 @@ const io = new Server(server, {
 const PORT = process.env.PORT || 5000;
 
 app.use(bodyParser.json());
-app.use(cors({
-  origin: 'https://dock-mgmt.netlify.app',
-  methods: ["GET", "POST"]
-}));
+app.use(cors());
 
 let docks = Array.from({ length: 10 }, (_, i) => ({
   dockNumber: i + 1,
@@ -51,6 +48,8 @@ fs.createReadStream(path.join(__dirname, 'dock-in-promise-updated.csv'))
     });
   });
 
+
+ 
 function timeToMinutes(time) {
   const [timePart, period] = time.split(' ');
   let [hours, minutes, seconds] = timePart.split(':');
@@ -85,57 +84,31 @@ function compareTimes(source, currentTime) {
   return arrivalMinutes <= dockInMinutes;
 }
 
-function assignDock(vehicle) {
-  const { vehicleNumber, source, unloadingTime, is3PL } = vehicle;
-  let assignedDock = null;
-
-  const dockWithSameSource = docks.find(dock => dock.source === source && dock.source !== 'PH' && dock.status === 'occupied');
-  if (dockWithSameSource)
-    return null;
-
+// Function to assign a dock without prioritizing waiting list
+function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
+  let availableDock = null;
+  
   if (is3PL) {
-    assignedDock = docks.find(dock => dock.status === 'available' && dock.dockNumber >= 7 && dock.dockNumber <= 9 && !dock.isDisabled);
+    // If the vehicle is 3PL, find an available dock among docks 7, 8, and 9
+    availableDock = docks.find(dock => dock.dockNumber >= 7 && dock.dockNumber <= 9 && dock.status === 'available' && !dock.isDisabled);
   } else {
-    const isPHVehicle = source === 'PH';
-
-    if (isPHVehicle) {
-      if (phDockNumbers.length < 2) {
-        if (phDockNumbers.length === 0) {
-          assignedDock = docks.find(dock => dock.status === 'available' && (dock.dockNumber <= 6 || dock.dockNumber === 10) && !dock.isDisabled);
-        } else {
-          assignedDock = docks.find(dock => phDockNumbers.includes(dock.dockNumber) && !dock.isDisabled);
-        }
-      }
-    }
-
-    if (!isPHVehicle && !assignedDock) {
-      assignedDock = docks.find(dock => dock.status === 'available' && dock.source !== source && !dock.isDisabled);
-    }
+    // For non-3PL vehicles, find any available dock
+    availableDock = docks.find(dock => dock.status === 'available' && !dock.isDisabled);
   }
-
-  if (assignedDock) {
-    const dockIndex = docks.findIndex(dock => dock.dockNumber === assignedDock.dockNumber);
-
-    const newAssignment = {
-      dockNumber: assignedDock.dockNumber,
-      status: 'occupied',
-      vehicleNumber,
-      source,
-      unloadingTime,
-      is3PL,
-      id: `${assignedDock.dockNumber}-${vehicleNumber}`
-    };
-
-    if (source === 'PH') {
-      phDockNumbers.push(assignedDock.dockNumber);
-    }
-
-    docks[dockIndex] = newAssignment;
-    return assignedDock.dockNumber;
-  } else {
-    return null;
+  
+  if (availableDock) {
+    availableDock.id=`${vehicleNumber}-${availableDock.dockNumber}`
+    availableDock.status = 'occupied';
+    availableDock.vehicleNumber = vehicleNumber;
+    availableDock.source = source;
+    availableDock.unloadingTime = unloadingTime;
+    availableDock.is3PL = is3PL;
+    return availableDock.dockNumber;
   }
+  assignWaitingVehiclesToDocks();
+  return null;
 }
+
 
 function prioritizeDocks() {
   const currentTime = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -171,15 +144,7 @@ function prioritizeDocks() {
   });
 }
 
-function assignAndPrioritizeDock(vehicle) {
-  const dockNumber = assignDock(vehicle);
-  if (dockNumber !== null) {
-    prioritizeDocks();
-    io.emit('dockStatusUpdate', { docks, waitingVehicles }); // Emit updates here as well
-    return dockNumber;
-  }
-  return null;
-}
+
 
 function prioritizeWaitingVehicles() {
   waitingVehicles.sort((a, b) => {
@@ -194,37 +159,78 @@ function prioritizeWaitingVehicles() {
     const bPromiseTime = timeToMinutes(routeMaster.find(r => r.SMH === b.source).Promise);
     return aPromiseTime - bPromiseTime;
   });
+
 }
 
-// Modify the '/api/assign-dock' endpoint to prioritize waiting list
+
+
+
 app.post('/api/assign-dock', (req, res) => {
   const { vehicleNumber, source, unloadingTime, is3PL } = req.body;
 
-  const currentTime = new Date().toLocaleTimeString('en-US', { hour12: false });
-
-  const isOnTime = compareTimes(source, currentTime);
-
   let assignedDockNumber = null;
-  if (isOnTime || docks.some(dock => dock.status === 'available' && !dock.isDisabled)) {
-    assignedDockNumber = assignAndPrioritizeDock({ vehicleNumber, source, unloadingTime, is3PL });
+
+  // Check if there is an available dock
+  if (docks.some(dock => dock.status === 'available' && !dock.isDisabled)) {
+    assignedDockNumber = assignDock({ vehicleNumber, source, unloadingTime, is3PL });
   }
 
-  if (assignedDockNumber) {
+  console.log(`Assigned Dock Number: ${assignedDockNumber}`);
+  if (assignedDockNumber !== null) {
+    console.log('Control reaches here: Dock assigned');
+    prioritizeDocks();
     io.emit('dockStatusUpdate', { docks, waitingVehicles });
     return res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
   }
 
-  const assignedDock = docks.find(dock => dock.source === source);
-  waitingVehicles.push({ vehicleNumber, source, unloadingTime, is3PL, dockNumber: assignedDock ? assignedDock.dockNumber : null });
+  console.log('I am here: No available dock, adding vehicle to waiting list');
 
+  // If no available dock, add the vehicle to the waiting list
+  waitingVehicles.push({ vehicleNumber, source, unloadingTime, is3PL });
+
+  // Try to assign waiting vehicles to available docks
+  assignWaitingVehiclesToDocks();
   prioritizeWaitingVehicles();
 
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
-  res.status(200).json({ message: 'All docks are full or the vehicle is late, added to waiting list' });
+
+  // If the vehicle couldn't be assigned immediately, it means all docks are currently occupied
+  return res.status(200).json({ message: 'All docks are full or the vehicle is late, added to waiting list' });
 });
-app.get('/',(req,res)=>{
-    res.status(200).json({message:`Server is running fine at ${PORT}!`});
-})
+
+function assignWaitingVehiclesToDocks() {
+  // Iterate through the docks to find available ones
+  const availableDocks = docks.filter(dock => dock.status === 'available' && !dock.isDisabled);
+
+  // If there are available docks and waiting vehicles
+  if (availableDocks.length > 0 && waitingVehicles.length > 0) {
+    // Iterate through available docks and waiting vehicles
+    availableDocks.forEach(dock => {
+      const nextVehicle = waitingVehicles.shift(); // Get the next vehicle from the waiting list
+      dock.status = 'occupied';
+      dock.vehicleNumber = nextVehicle.vehicleNumber;
+      dock.unloadingTime = nextVehicle.unloadingTime;
+      dock.is3PL = nextVehicle.is3PL;
+      dock.source = nextVehicle.source;
+      
+      // Emit socket event to update dock status
+      io.emit('dockStatusUpdate', { docks, waitingVehicles });
+      
+      // Log the assignment
+      console.log(`Vehicle ${nextVehicle.vehicleNumber} assigned to dock ${dock.dockNumber}`);
+    });
+  }
+
+  prioritizeWaitingVehicles();
+}
+
+// Run assignWaitingVehiclesToDocks anytime you want to assign waiting vehicles to docks
+// For example, you can call it periodically using setInterval
+setInterval(assignWaitingVehiclesToDocks, 60000); // Run every minute (adjust as needed)
+app.get('/', (req, res) => {
+  res.status(200).json({ message: `Server is running fine at ${PORT}!` });
+});
+
 // Get dock status
 app.get('/api/dock-status', (req, res) => {
   res.status(200).json({ docks, waitingVehicles });
@@ -234,36 +240,24 @@ app.post('/api/release-dock', (req, res) => {
   const { dockId } = req.body;
   const dockIndex = docks.findIndex(dock => dock.id === dockId);
 
-  if (dockIndex !== -1 && docks[dockIndex].status === 'occupied') {
+  if (dockIndex === -1) {
+    return res.status(404).json({ message: 'Dock not found.' });
+  }
+
+  if (docks[dockIndex].status === 'occupied') {
     const dock = docks[dockIndex];
     const releasedVehicleNumber = dock.vehicleNumber;
     dock.status = 'available';
     dock.vehicleNumber = null;
     dock.unloadingTime = null;
     dock.is3PL = null;
-
-    if (waitingVehicles.length > 0) {
-      const index = waitingVehicles.findIndex(vehicle => vehicle.source === dock.source);
-
-      if (index !== -1) {
-        const nextVehicle = waitingVehicles.splice(index, 1)[0];
-
-        docks[dockIndex].status = 'occupied';
-        docks[dockIndex].vehicleNumber = nextVehicle.vehicleNumber;
-        docks[dockIndex].unloadingTime = nextVehicle.unloadingTime;
-        docks[dockIndex].is3PL = nextVehicle.is3PL;
-        docks[dockIndex].source = nextVehicle.source;
-
-        io.emit('dockStatusUpdate', { docks, waitingVehicles });
-        return res.status(200).json({ message: `Dock ${dock.dockNumber} is now available. Vehicle ${releasedVehicleNumber} has been undocked. Vehicle ${nextVehicle.vehicleNumber} from waiting list has been assigned to dock.` });
-      }
-    }
-
     dock.source = null;
-    io.emit('dockStatusUpdate', { docks, waitingVehicles });
+
+    assignWaitingVehiclesToDocks();
+
     return res.status(200).json({ message: `Dock ${dock.dockNumber} is now available. Vehicle ${releasedVehicleNumber} has been undocked.` });
   } else {
-    res.status(404).json({ message: `Dock is not occupied or does not exist.` });
+    return res.status(404).json({ message: `Dock is not occupied or does not exist.` });
   }
 });
 
@@ -286,6 +280,8 @@ app.post('/api/initialize-docks', (req, res) => {
 app.post('/api/disable-dock', (req, res) => {
   const { dockNumber } = req.body;
   const dock = docks.find(d => d.dockNumber === dockNumber);
+
+  console.log(`${dock.id} has been disabled!`);
 
   if (dock) {
     dock.isDisabled = true;
@@ -317,3 +313,4 @@ io.on('connection', (socket) => {
     console.log('User disconnected');
   });
 });
+
