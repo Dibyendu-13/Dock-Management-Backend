@@ -7,11 +7,13 @@ const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
 
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: 'https://dock-mgmt.netlify.app',
+
     methods: ["GET", "POST"]
   }
 });
@@ -21,7 +23,7 @@ const PORT = process.env.PORT || 5000;
 app.use(bodyParser.json());
 app.use(cors());
 
-let docks = Array.from({ length: 10 }, (_, i) => ({
+let docks = Array.from({ length: 10}, (_, i) => ({
   dockNumber: i + 1,
   status: 'available',
   vehicleNumber: null,
@@ -89,15 +91,35 @@ function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
   let availableDock = null;
   
   if (is3PL) {
-    // If the vehicle is 3PL, find an available dock among docks 7, 8, and 9
     availableDock = docks.find(dock => dock.dockNumber >= 7 && dock.dockNumber <= 9 && dock.status === 'available' && !dock.isDisabled);
   } else {
-    // For non-3PL vehicles, find any available dock
     availableDock = docks.find(dock => dock.status === 'available' && !dock.isDisabled);
   }
-  
+
   if (availableDock) {
-    availableDock.id=`${vehicleNumber}-${availableDock.dockNumber}`
+    if (source === 'PH') {
+      const phOccupiedCount = docks.filter(dock => dock.source === 'PH' && dock.status === 'occupied').length;
+      if (phOccupiedCount === 2) {
+        console.log('Maximum limit reached for PH vehicles on a dock.');
+        if (phOccupiedCount === 1) {
+          // Push PH data onto the array for the second time
+          docks.push({
+            dockNumber: availableDock.dockNumber,
+            status: 'occupied',
+            vehicleNumber,
+            source,
+            unloadingTime,
+            is3PL,
+            id: `${vehicleNumber}-${availableDock.dockNumber}`
+          });
+          return availableDock.dockNumber;
+        } else {
+          return null; // Maximum limit reached for PH vehicles on a dock
+        }
+      }
+    }
+    
+    availableDock.id = `${vehicleNumber}-${availableDock.dockNumber}`;
     availableDock.status = 'occupied';
     availableDock.vehicleNumber = vehicleNumber;
     availableDock.source = source;
@@ -105,6 +127,7 @@ function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
     availableDock.is3PL = is3PL;
     return availableDock.dockNumber;
   }
+  
   assignWaitingVehiclesToDocks();
   return null;
 }
@@ -142,6 +165,9 @@ function prioritizeDocks() {
 
     return aPromiseTime - bPromiseTime;
   });
+
+  io.emit('dockStatusUpdate', { docks, waitingVehicles });
+
 }
 
 
@@ -159,6 +185,9 @@ function prioritizeWaitingVehicles() {
     const bPromiseTime = timeToMinutes(routeMaster.find(r => r.SMH === b.source).Promise);
     return aPromiseTime - bPromiseTime;
   });
+
+  io.emit('dockStatusUpdate', { docks, waitingVehicles });
+
 
 }
 
@@ -243,8 +272,9 @@ app.post('/api/release-dock', (req, res) => {
   if (dockIndex === -1) {
     return res.status(404).json({ message: 'Dock not found.' });
   }
-
+  console.log(docks[dockIndex]);
   if (docks[dockIndex].status === 'occupied') {
+    console.log("Control reaches here")
     const dock = docks[dockIndex];
     const releasedVehicleNumber = dock.vehicleNumber;
     dock.status = 'available';
@@ -294,18 +324,26 @@ app.post('/api/disable-dock', (req, res) => {
 });
 
 app.post('/api/enable-dock', (req, res) => {
-  const { dockNumber } = req.body;
-  const dock = docks.find(d => d.dockNumber === dockNumber);
+  const { dock } = req.body;
 
-  if (dock) {
+  // Assuming docks is an array of dock objects
+  const index = docks.findIndex(d => d.id === dock.id);
+
+  if (index !== -1) { // Check if the dock exists in the array
+    // Assuming docks is some kind of database or data management object
+    // and it has a method called 'update' to update the dock information
     dock.isDisabled = false;
-    dock.status = 'available';
+    docks[index] = dock; // Update the dock object in the array
+
+    // Assuming 'io' is a socket.io instance for emitting events
     io.emit('dockStatusUpdate', { docks, waitingVehicles });
-    return res.status(200).json({ message: `Dock ${dockNumber} is now enabled` });
+
+    return res.status(200).json({ message: `Dock ${dock.dockNumber} is now enabled` });
   } else {
-    res.status(404).json({ message: `Dock ${dockNumber} does not exist.` });
+    return res.status(404).json({ message: `Dock ${dock.dockNumber} does not exist.` });
   }
 });
+
 
 io.on('connection', (socket) => {
   console.log('A user connected');
