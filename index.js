@@ -135,10 +135,13 @@ function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
 
 function prioritizeDocks() {
   const currentTime = new Date().toLocaleTimeString('en-US', { hour12: false });
+  console.log("Priorityyyyyyyyyyyy!")
 
   docks.sort((a, b) => {
     const isFRKorGGN_A = a.source === 'FRK' || a.source === 'GGN';
     const isFRKorGGN_B = b.source === 'FRK' || b.source === 'GGN';
+
+    // Prioritize FRK and GGN sources first
     if (isFRKorGGN_A && !isFRKorGGN_B) {
       return -1;
     }
@@ -153,49 +156,113 @@ function prioritizeDocks() {
       return 0;
     }
 
-    const aLateness = timeToMinutes(currentTime) - timeToMinutes(routeA['dock in time']);
-    const bLateness = timeToMinutes(currentTime) - timeToMinutes(routeB['dock in time']);
+    const currentTimeMinutes = timeToMinutes(currentTime);
+    const aDockInTime = timeToMinutes(routeA['dock in time']);
+    const bDockInTime = timeToMinutes(routeB['dock in time']);
+    const aLateness = currentTimeMinutes - aDockInTime;
+    const bLateness = currentTimeMinutes - bDockInTime;
 
-    if (aLateness !== bLateness) {
-      return aLateness - bLateness;
+    const aPromiseTime = timeToMinutes(routeA.Promise);
+    const bPromiseTime = timeToMinutes(routeB.Promise);
+
+    if (aLateness > 30 && bLateness > 30) {
+      // Both are delayed, prioritize by promise time
+      return aPromiseTime - bPromiseTime;
     }
 
-    const aPromiseTime = timeToMinutes(routeA.Promise) - 120; // 2 hours before promise time
-    const bPromiseTime = timeToMinutes(routeB.Promise) - 120; // 2 hours before promise time
+    if (aLateness <= 30 && bLateness > 30) {
+      // A is on time, B is late
+      return -1;
+    }
 
+    if (aLateness > 30 && bLateness <= 30) {
+      // A is late, B is on time
+      return 1;
+    }
+
+    if (aLateness <= 30 && bLateness <= 30) {
+      // Both are on time, prioritize by promise time
+      return aPromiseTime - bPromiseTime;
+    }
+
+    // Fallback to promise time
     return aPromiseTime - bPromiseTime;
   });
 
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
-
 }
-
-
 
 function prioritizeWaitingVehicles() {
   waitingVehicles.sort((a, b) => {
-    const aOnTime = compareTimes(a.source, a.currentTime);
-    const bOnTime = compareTimes(b.source, b.currentTime);
+    const currentTime = new Date().toLocaleTimeString('en-US', { hour12: false });
+    const currentTimeMinutes = timeToMinutes(currentTime);
 
-    if (aOnTime !== bOnTime) {
-      return aOnTime - bOnTime;
+    const isFRKorGGN_A = a.source === 'FRK' || a.source === 'GGN';
+    const isFRKorGGN_B = b.source === 'FRK' || b.source === 'GGN';
+
+    // Prioritize FRK and GGN sources first
+    if (isFRKorGGN_A && !isFRKorGGN_B) {
+      return -1;
+    }
+    if (!isFRKorGGN_A && isFRKorGGN_B) {
+      return 1;
     }
 
-    const aPromiseTime = timeToMinutes(routeMaster.find(r => r.SMH === a.source).Promise);
-    const bPromiseTime = timeToMinutes(routeMaster.find(r => r.SMH === b.source).Promise);
+    const routeA = routeMaster.find(r => r.SMH === a.source);
+    const routeB = routeMaster.find(r => r.SMH === b.source);
+
+    if (!routeA || !routeB) {
+      return 0;
+    }
+
+    const aAllocationTime = timeToMinutes(a.allocationTime);
+    const bAllocationTime = timeToMinutes(b.allocationTime);
+
+    const aLateness =   aAllocationTime-currentTimeMinutes;
+    const bLateness = bAllocationTime-currentTimeMinutes;
+
+    const aPromiseTime = timeToMinutes(routeA.Promise);
+    const bPromiseTime = timeToMinutes(routeB.Promise);
+
+    if (aLateness > 30 && bLateness > 30) {
+      // Both are delayed, prioritize by promise time
+      return aPromiseTime - bPromiseTime;
+    }
+
+    if (aLateness <= 30 && bLateness > 30) {
+      // A is on time, B is late
+      return -1;
+    }
+
+    if (aLateness > 30 && bLateness <= 30) {
+      // A is late, B is on time
+      return 1;
+    }
+
+    if (aLateness <= 30 && bLateness <= 30) {
+      // Both are on time, prioritize by promise time
+      return aPromiseTime - bPromiseTime;
+    }
+
+    // Fallback to promise time
     return aPromiseTime - bPromiseTime;
   });
 
+  console.log(docks);
+
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
-
-
 }
+
 
 
 
 
 app.post('/api/assign-dock', (req, res) => {
   const { vehicleNumber, source, unloadingTime, is3PL } = req.body;
+
+  if(docks.find(dock=>dock.vehicleNumber===vehicleNumber))
+    return res.status(400).json({ message: 'Invalid Vehicle Number!' });
+
 
   let assignedDockNumber = null;
 
@@ -215,7 +282,8 @@ app.post('/api/assign-dock', (req, res) => {
   console.log('I am here: No available dock, adding vehicle to waiting list');
 
   // If no available dock, add the vehicle to the waiting list
-  waitingVehicles.push({ vehicleNumber, source, unloadingTime, is3PL });
+  let sequence=waitingVehicles.length+1;
+  waitingVehicles.push({ sequence, vehicleNumber, source, unloadingTime, is3PL });
 
   // Try to assign waiting vehicles to available docks
   assignWaitingVehiclesToDocks();
@@ -241,6 +309,7 @@ function assignWaitingVehiclesToDocks() {
       dock.unloadingTime = nextVehicle.unloadingTime;
       dock.is3PL = nextVehicle.is3PL;
       dock.source = nextVehicle.source;
+    
       
       // Emit socket event to update dock status
       io.emit('dockStatusUpdate', { docks, waitingVehicles });
