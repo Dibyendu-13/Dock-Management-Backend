@@ -158,14 +158,19 @@ function prioritizeDocks() {
       return 0;
     }
 
+    
+    // console.log(currentTime)
+    // console.log(routeA['dock in time'])
+    // console.log(routeB['dock in time'])
+
     const currentTimeMinutes = timeToMinutes(currentTime);
     const aDockInTime = timeToMinutes(routeA['dock in time']);
     const bDockInTime = timeToMinutes(routeB['dock in time']);
     const aLateness = currentTimeMinutes - aDockInTime;
     const bLateness = currentTimeMinutes - bDockInTime;
 
-    const aPromiseTime = timeToMinutes(routeA.Promise);
-    const bPromiseTime = timeToMinutes(routeB.Promise);
+    const aPromiseTime = timeToMinutes(routeA['Promise']);
+    const bPromiseTime = timeToMinutes(routeB['Promise']);
 
     if (aLateness > 30 && bLateness > 30) {
       // Both are delayed, prioritize by promise time
@@ -217,14 +222,15 @@ function prioritizeWaitingVehicles() {
       return 0;
     }
 
-    const aAllocationTime = timeToMinutes(a.allocationTime);
-    const bAllocationTime = timeToMinutes(b.allocationTime);
+    const aDockInTime = timeToMinutes(routeA['dock in time']);
+    const bDockInTime = timeToMinutes(routeB['dock in time']);
 
-    const aLateness =   aAllocationTime-currentTimeMinutes;
-    const bLateness = bAllocationTime-currentTimeMinutes;
+    const aLateness =   aDockInTime-currentTimeMinutes;
+    const bLateness = bDockInTime-currentTimeMinutes;
 
-    const aPromiseTime = timeToMinutes(routeA.Promise);
-    const bPromiseTime = timeToMinutes(routeB.Promise);
+
+    const aPromiseTime = timeToMinutes(routeA['Promise']);
+    const bPromiseTime = timeToMinutes(routeB['Promise']);
 
     if (aLateness > 30 && bLateness > 30) {
       // Both are delayed, prioritize by promise time
