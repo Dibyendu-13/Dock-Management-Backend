@@ -7,11 +7,13 @@ const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
 
+// origin: 'http://localhost:3000' ,
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
+    
     origin: 'https://dock-mgmt.netlify.app',
 
     methods: ["GET", "POST"]
@@ -309,6 +311,8 @@ function assignWaitingVehiclesToDocks() {
       dock.unloadingTime = nextVehicle.unloadingTime;
       dock.is3PL = nextVehicle.is3PL;
       dock.source = nextVehicle.source;
+      dock.id = `${dock.dockNumber}-${nextVehicle.vehicleNumber}`;
+
     
       
       // Emit socket event to update dock status
@@ -320,6 +324,10 @@ function assignWaitingVehiclesToDocks() {
   }
 
   prioritizeWaitingVehicles();
+  
+   // Emit socket event to update dock status
+   io.emit('dockStatusUpdate', { docks, waitingVehicles });
+
 }
 
 // Run assignWaitingVehiclesToDocks anytime you want to assign waiting vehicles to docks
@@ -354,7 +362,12 @@ app.post('/api/release-dock', (req, res) => {
 
     assignWaitingVehiclesToDocks();
 
-    return res.status(200).json({ message: `Dock ${dock.dockNumber} is now available. Vehicle ${releasedVehicleNumber} has been undocked.` });
+    return res.status(200).json({
+      message: `Dock ${dock.dockNumber} is now available. Vehicle ${releasedVehicleNumber} has been undocked.`,
+      dockNumber: dock.dockNumber,
+      vehicleNumber: releasedVehicleNumber
+    });
+    
   } else {
     return res.status(404).json({ message: `Dock is not occupied or does not exist.` });
   }
