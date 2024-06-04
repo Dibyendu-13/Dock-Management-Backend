@@ -24,12 +24,7 @@ const PORT = process.env.PORT || 5000;
 
 app.use(bodyParser.json());
 app.use(cors());
-// Middleware to set COOP and COEP headers
-app.use((req, res, next) => {
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-  res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-  next();
-});
+
 
 let docks = Array.from({ length: 10}, (_, i) => ({
   dockNumber: i + 1,
