@@ -345,6 +345,8 @@ app.post('/api/assign-dock', (req, res) => {
   
   waitingVehicles.push({  vehicleNumber, source, unloadingTime, is3PL });
 
+  prioritizeWaitingVehicles();
+
   // console.log(waitingVehicles);
 
   
@@ -360,7 +362,7 @@ app.post('/api/assign-dock', (req, res) => {
 function assignWaitingVehiclesToDocks() {
   // Filter to find available docks
   const availableDocks = docks.filter((dock =>( dock.status === 'available' && !dock.isDisabled) || (dock.source==='PH' && !dock.isDisabled )));
-
+  prioritizeWaitingVehicles();
   // Iterate through available docks and assign them to waiting vehicles
   availableDocks.forEach(dock => {
     if (waitingVehicles.length > 0) {
@@ -378,14 +380,15 @@ function assignWaitingVehiclesToDocks() {
         // Log the assignment
         // console.log(`Vehicle ${nextVehicle.vehicleNumber} assigned to dock ${assignedDockNumber}`);
       }
+      
+    // Prioritize waiting vehicles
+    prioritizeWaitingVehicles();
 
       // Emit socket event to update dock status
       io.emit('dockStatusUpdate', { docks, waitingVehicles });
     }
   });
 
-  // Prioritize waiting vehicles
-  prioritizeWaitingVehicles();
 
   // Emit socket event to update dock status after prioritizing
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
