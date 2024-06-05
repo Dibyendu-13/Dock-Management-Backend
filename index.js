@@ -177,12 +177,6 @@ function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
         
       }
 
-  
-
-
- 
-
-  
   return null;
 }
 
