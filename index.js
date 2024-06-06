@@ -1,11 +1,13 @@
 const express = require('express');
 const bodyParser = require('body-parser');
+const { MongoClient, ServerApiVersion } = require('mongodb');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
+const { DateTime } = require('luxon'); 
 
 // origin: 'http://localhost:3000' ,
 
@@ -21,6 +23,51 @@ const io = new Server(server, {
 });
 
 const PORT = process.env.PORT || 5000;
+
+const uri = "mongodb+srv://dibyendubar1370:hello6buddy@cluster0.ccdmlvp.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&ssl=true";
+
+
+// Create a MongoClient with a MongoClientOptions object to set the Stable API version
+const client = new MongoClient(uri, {
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+ 
+});
+
+
+
+
+async function run() {
+  try {
+    // Connect the client to the server	(optional starting in v4.7)
+    await client.connect();
+    // Send a ping to confirm a successful connection
+    await client.db("admin").command({ ping: 1 });
+    
+    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    
+   
+  } finally {
+    // Ensures that the client will close when you finish/error
+    await client.close();
+  }
+}
+
+async function connectToDatabase() {
+  try {
+    await client.connect();
+    console.log('Connected to MongoDB Atlas!');
+    return client.db('Docks');
+  } catch (e) {
+    console.error(e);
+    process.exit(1);
+  }
+}
 
 app.use(bodyParser.json());
 app.use(cors());
@@ -311,8 +358,12 @@ function prioritizeWaitingVehicles() {
 
 
 
-app.post('/api/assign-dock', (req, res) => {
+app.post('/api/assign-dock', async (req, res) => {
   const { vehicleNumber, source, unloadingTime, is3PL } = req.body;
+  const db = await connectToDatabase();
+
+
+  console.log("In assign dock!");
 
   if(docks.find(dock=>dock.vehicleNumber===vehicleNumber))
     return res.status(400).json({ message: 'Invalid Vehicle Number!' });
@@ -325,9 +376,33 @@ app.post('/api/assign-dock', (req, res) => {
     assignedDockNumber = assignDock({ vehicleNumber, source, unloadingTime, is3PL });
   }
 
-  // console.log(`Assigned Dock Number: ${assignedDockNumber}`);
+  console.log(`Assigned Dock Number: ${assignedDockNumber}`);
   if (assignedDockNumber !== null) {
-    // console.log('Control reaches here: Dock assigned');
+    console.log('Control reaches here: Dock assigned');
+
+    const currentTime = DateTime.now();
+    const dockInTimeReadable = currentTime.toFormat('h:mm a, LL/dd/yyyy');
+
+    let newDock= {
+      vehicleNumber: vehicleNumber,
+      dockNumber:assignedDockNumber,
+      source:source,
+      dockInTime:dockInTimeReadable,
+      dockOutTime:null
+
+      
+      
+    };
+
+    db.collection('Docks').insertOne(newDock, function(err, result) {
+      if (err) {
+          console.log("Error inserting document:", err);
+          return;
+      }
+      console.log("Document inserted successfully:", result.insertedId);
+  });
+   
+    
     prioritizeDocks();
     io.emit('dockStatusUpdate', { docks, waitingVehicles });
     return res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
@@ -336,6 +411,7 @@ app.post('/api/assign-dock', (req, res) => {
   // console.log('I am here: No available dock, adding vehicle to waiting list');
 
   // If no available dock, add the vehicle to the waiting list
+ 
   
   waitingVehicles.push({  vehicleNumber, source, unloadingTime, is3PL });
 
@@ -392,16 +468,16 @@ function assignWaitingVehiclesToDocks() {
 // Run assignWaitingVehiclesToDocks anytime you want to assign waiting vehicles to docks
 // For example, you can call it periodically using setInterval
 setInterval(assignWaitingVehiclesToDocks, 60000); // Run every minute (adjust as needed)
-app.get('/', (req, res) => {
-  res.status(200).json({ message: `Server is running fine at ${PORT}!` });
-});
+
 
 // Get dock status
 app.get('/api/dock-status', (req, res) => {
   res.status(200).json({ docks, waitingVehicles });
 });
 
-app.post('/api/release-dock', (req, res) => {
+app.post('/api/release-dock', async(req, res) => {
+  
+  const db = await connectToDatabase();
   const { dockId } = req.body;
   const dockIndex = docks.findIndex(dock => dock.id === dockId);
 
@@ -410,6 +486,20 @@ app.post('/api/release-dock', (req, res) => {
   }
 
   const dock = docks[dockIndex];
+
+  // Update the dockOutTime field
+
+ // Get the current time
+  const currentTime = DateTime.now();
+  const dockOutTimeReadable = currentTime.toFormat('h:mm a, LL/dd/yyyy');
+
+
+  const updateResult = await db.collection("Docks").updateOne(
+      { vehicleNumber: dock.vehicleNumber }, // Filter by vehicleNumber
+      { $set: { dockOutTime: dockOutTimeReadable } } // Update dockOutTime
+  );
+
+  console.log("Document updated successfully:", updateResult.modifiedCount);
 
   if (dock.status === 'occupied') {
       // Count the number of docks with the same dock number
@@ -440,6 +530,8 @@ app.post('/api/release-dock', (req, res) => {
       dock.source = null;
 
       // console.log(`Dock with id ${dockId} reset to available.`);
+
+
       io.emit('dockStatusUpdate', { docks, waitingVehicles });
       assignWaitingVehiclesToDocks();
       return res.status(200).json({
@@ -486,6 +578,7 @@ app.post('/api/disable-dock', (req, res) => {
   }
 });
 
+
 app.post('/api/enable-dock', (req, res) => {
   const { dock } = req.body;
 
@@ -507,7 +600,7 @@ app.post('/api/enable-dock', (req, res) => {
   }
 });
 
-
+run();
 io.on('connection', (socket) => {
   console.log('A user connected');
   socket.on('disconnect', () => {
