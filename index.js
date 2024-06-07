@@ -16,7 +16,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     
-   origin: '*' ,
+   origin: 'https://dock-mgmt.netlify.app' ,
 
     methods: ["GET", "POST"]
   }
@@ -42,7 +42,7 @@ const client = new MongoClient(uri, {
 app.use(bodyParser.json());
 // Explicitly configure CORS
 app.use(cors({
-  origin: '*', // Update this to the specific origin if needed
+  origin: 'https://dock-mgmt.netlify.app', // Update this to the specific origin if needed
   methods: ["GET", "POST"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
