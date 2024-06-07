@@ -14,16 +14,19 @@ const { DateTime } = require('luxon');
 const app = express();
 app.use(bodyParser.json());
 // Explicitly configure CORS
-app.use(cors({
-  origin: 'https://dock-mgmt.netlify.app', // Update this to the specific origin if needed
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  next();
+});
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     
-   origin: 'https://dock-mgmt.netlify.app' ,
+   origin: '*' ,
 
     methods: ["GET", "POST"]
   }
@@ -43,41 +46,20 @@ const client = new MongoClient(uri, {
   }
 })
 
-
-
-
 let db;
 
-async function run() {
-  try {
-    // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
-   
-    
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
-    db=connectToDatabase();
-   
-  } finally {
-    // Ensures that the client will close when you finish/error
-    await client.close();
-  }
-}
 async function connectToDatabase() {
   try {
-
-
-    // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
     console.log('Connected to MongoDB Atlas!');
-    return client.db('Docks');
+    db = client.db('Docks');
   } catch (e) {
     console.error(e);
     process.exit(1);
   }
 }
 
-
-run();
+connectToDatabase()
 
 
 
@@ -368,7 +350,7 @@ function prioritizeWaitingVehicles() {
 
 app.post('/api/assign-dock', async (req, res) => {
   const { vehicleNumber, source, unloadingTime, is3PL } = req.body;
-  const db = await connectToDatabase();
+
 
 
   console.log("In assign dock!");
@@ -402,14 +384,20 @@ app.post('/api/assign-dock', async (req, res) => {
       
     };
 
-    db.collection('Docks').insertOne(newDock, function(err, result) {
-      if (err) {
-          console.log("Error inserting document:", err);
-          return;
-      }
-      console.log("Document inserted successfully:", result.insertedId);
-  });
-   
+    if (!db) {
+      throw new Error('Database connection not established');
+    }
+
+    try {
+      await db.collection('Docks').insertOne(newDock);
+      prioritizeDocks();
+      io.emit('dockStatusUpdate', { docks, waitingVehicles });
+      return res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
+    } catch (err) {
+      console.error('Error inserting document', err);
+      return res.status(500).json({ message: 'Internal Server Error' });
+    }
+  
     
     prioritizeDocks();
     io.emit('dockStatusUpdate', { docks, waitingVehicles });
@@ -485,7 +473,7 @@ app.get('/api/dock-status', (req, res) => {
 
 app.post('/api/release-dock', async(req, res) => {
   
-  const db = await connectToDatabase();
+ 
   const { dockId } = req.body;
   const dockIndex = docks.findIndex(dock => dock.id === dockId);
 
@@ -501,13 +489,22 @@ app.post('/api/release-dock', async(req, res) => {
   const currentTime = DateTime.now();
   const dockOutTimeReadable = currentTime.toFormat('h:mm a, LL/dd/yyyy');
 
+  if (!db) {
+    throw new Error('Database connection not established');
+  }
 
-  const updateResult = await db.collection("Docks").updateOne(
+  try {
+    const updateResult = await db.collection("Docks").updateOne(
       { vehicleNumber: dock.vehicleNumber }, // Filter by vehicleNumber
       { $set: { dockOutTime: dockOutTimeReadable } } // Update dockOutTime
-  );
+    );
 
-  console.log("Document updated successfully:", updateResult.modifiedCount);
+    console.log("Document updated successfully:", updateResult.modifiedCount);
+    
+  } catch (err) {
+    console.error('Error updating document', err);
+    return res.status(500).json({ message: 'Internal Server Error' });
+  }
 
   if (dock.status === 'occupied') {
       // Count the number of docks with the same dock number
