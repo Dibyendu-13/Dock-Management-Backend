@@ -24,7 +24,7 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 5000;
 
-const uri = "mongodb+srv://dibyendubar1370:hello6buddy@cluster0.ccdmlvp.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&ssl=true";
+const uri = "mongodb+srv://dibyendubar1370:hello6buddy@cluster0.ccdmlvp.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&&ssl=true";
 
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -33,33 +33,36 @@ const client = new MongoClient(uri, {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  },
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
- 
-});
+  }
+})
 
 
 
+
+app.use(bodyParser.json());
+app.use(cors());
+
+let db;
 
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
+   
     
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
-    
+    db=connectToDatabase();
    
   } finally {
     // Ensures that the client will close when you finish/error
     await client.close();
   }
 }
-
 async function connectToDatabase() {
   try {
+
+
+    // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
     console.log('Connected to MongoDB Atlas!');
     return client.db('Docks');
@@ -69,8 +72,9 @@ async function connectToDatabase() {
   }
 }
 
-app.use(bodyParser.json());
-app.use(cors());
+
+run();
+
 
 
 let docks = Array.from({ length: 10}, (_, i) => ({
@@ -600,7 +604,7 @@ app.post('/api/enable-dock', (req, res) => {
   }
 });
 
-run();
+
 io.on('connection', (socket) => {
   console.log('A user connected');
   socket.on('disconnect', () => {
