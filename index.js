@@ -40,7 +40,12 @@ const client = new MongoClient(uri, {
 
 
 app.use(bodyParser.json());
-app.use(cors());
+// Explicitly configure CORS
+app.use(cors({
+  origin: '*', // Update this to the specific origin if needed
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 
 let db;
 
