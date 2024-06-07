@@ -12,6 +12,13 @@ const { DateTime } = require('luxon');
 // origin: 'http://localhost:3000' ,
 
 const app = express();
+app.use(bodyParser.json());
+// Explicitly configure CORS
+app.use(cors({
+  origin: 'https://dock-mgmt.netlify.app', // Update this to the specific origin if needed
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -38,14 +45,6 @@ const client = new MongoClient(uri, {
 
 
 
-
-app.use(bodyParser.json());
-// Explicitly configure CORS
-app.use(cors({
-  origin: 'https://dock-mgmt.netlify.app', // Update this to the specific origin if needed
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
 
 let db;
 
