@@ -203,6 +203,71 @@ function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
   return null;
 }
 
+
+function prioritizeDocks() {
+  const currentTime = new Date().toLocaleTimeString('en-US', { hour12: false });
+  // console.log("Priorityyyyyyyyyyyy!")
+
+  docks.sort((a, b) => {
+    const isFRKorGGN_A = a.source === 'FRK' || a.source === 'GGN';
+    const isFRKorGGN_B = b.source === 'FRK' || b.source === 'GGN';
+
+    // Prioritize FRK and GGN sources first
+    if (isFRKorGGN_A && !isFRKorGGN_B) {
+      return -1;
+    }
+    if (!isFRKorGGN_A && isFRKorGGN_B) {
+      return 1;
+    }
+
+    const routeA = routeMaster.find(r => r.SMH === a.source);
+    const routeB = routeMaster.find(r => r.SMH === b.source);
+
+    if (!routeA || !routeB) {
+      return 0;
+    }
+
+    
+    // console.log(currentTime)
+    // console.log(routeA['dock in time'])
+    // console.log(routeB['dock in time'])
+
+    const currentTimeMinutes = timeToMinutes(currentTime);
+    const aDockInTime = timeToMinutes(routeA['dock in time']);
+    const bDockInTime = timeToMinutes(routeB['dock in time']);
+    const aLateness = currentTimeMinutes - aDockInTime;
+    const bLateness = currentTimeMinutes - bDockInTime;
+
+    const aPromiseTime = timeToMinutes(routeA['Promise']);
+    const bPromiseTime = timeToMinutes(routeB['Promise']);
+
+    if (aLateness > 30 && bLateness > 30) {
+      // Both are delayed, prioritize by promise time
+      return aPromiseTime - bPromiseTime;
+    }
+
+    if (aLateness <= 30 && bLateness > 30) {
+      // A is on time, B is late
+      return -1;
+    }
+
+    if (aLateness > 30 && bLateness <= 30) {
+      // A is late, B is on time
+      return 1;
+    }
+
+    if (aLateness <= 30 && bLateness <= 30) {
+      // Both are on time, prioritize by promise time
+      return aPromiseTime - bPromiseTime;
+    }
+
+    // Fallback to promise time
+    return aPromiseTime - bPromiseTime;
+  });
+
+  io.emit('dockStatusUpdate', { docks, waitingVehicles });
+}
+
 function prioritizeWaitingVehicles() {
   waitingVehicles.sort((a, b) => {
     const currentTime = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -291,8 +356,9 @@ app.post('/api/assign-dock', async (req, res) => {
   if (assignedDockNumber !== null) {
     console.log('Control reaches here: Dock assigned');
 
-    const currentTime = new Date(currentTime.getTime() + (5 * 60 + 30) * 60 * 1000);
-    const dockInTimeReadable = currentTime.toFormat('h:mm a, LL/dd/yyyy');
+    const currentTime = new Date();
+    const addedTime = new Date(currentTime.getTime() + (5 * 60 + 30) * 60 * 1000);
+    const dockInTimeReadable = addedTime.toFormat('h:mm a, LL/dd/yyyy');
 
     let newDock= {
       vehicleNumber: vehicleNumber,
@@ -311,7 +377,8 @@ app.post('/api/assign-dock', async (req, res) => {
 
     try {
       await db.insertOne(newDock);
- 
+      prioritizeDocks();
+      io.emit('dockStatusUpdate', { docks, waitingVehicles });
       return res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
     } catch (err) {
       console.error('Error inserting document', err);
@@ -319,7 +386,7 @@ app.post('/api/assign-dock', async (req, res) => {
     }
   
     
-    
+    prioritizeDocks();
     io.emit('dockStatusUpdate', { docks, waitingVehicles });
     return res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
   }
@@ -406,8 +473,9 @@ app.post('/api/release-dock', async(req, res) => {
   // Update the dockOutTime field
 
  // Get the current time
-  const currentTime = new Date(currentTime.getTime() + (5 * 60 + 30) * 60 * 1000);
-  const dockOutTimeReadable = currentTime.toFormat('h:mm a, LL/dd/yyyy');
+ const currentTime = new Date();
+ const addedTime = new Date(currentTime.getTime() + (5 * 60 + 30) * 60 * 1000);
+ const dockOutTimeReadable = addedTime.toFormat('h:mm a, LL/dd/yyyy');
 
   if (!db) {
     throw new Error('Database connection not established');
