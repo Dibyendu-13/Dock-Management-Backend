@@ -81,6 +81,7 @@ fs.createReadStream(path.join(__dirname, 'dock-in-promise-updated.csv'))
 
  
 function timeToMinutes(time) {
+  console.log("Dock in Time for a Vehicle in min:",time);
   const [timePart, period] = time.split(' ');
   let [hours, minutes, seconds] = timePart.split(':');
   hours = parseInt(hours, 10);
@@ -94,24 +95,6 @@ function timeToMinutes(time) {
   }
 
   return hours * 60 + minutes + seconds / 60;
-}
-
-function getCurrentTimeInMinutes() {
-  const now = new Date();
-  const hours = now.getHours();
-  const minutes = now.getMinutes();
-  const seconds = now.getSeconds();
-  return hours * 60 + minutes + seconds / 60;
-}
-
-function compareTimes(source, currentTime) {
-  const route = routeMaster.find(r => r.SMH === source);
-  if (!route) return true; // If source not in route master, assign dock immediately
-
-  const dockInMinutes = timeToMinutes(route['dock in time']);
-  const arrivalMinutes = getCurrentTimeInMinutes();
-
-  return arrivalMinutes <= dockInMinutes;
 }
 
 // Function to assign a dock without prioritizing waiting list
@@ -208,6 +191,8 @@ function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
 
 
 function prioritizeWaitingVehicles() {
+
+
   waitingVehicles.sort((a, b) => {
     const currentTime = new Date().toLocaleTimeString('en-US', { hour12: false });
     const currentTimeMinutes = timeToMinutes(currentTime);
@@ -241,47 +226,33 @@ function prioritizeWaitingVehicles() {
 
     const latenessBuffer = 30; // 30 minutes buffer
 
-    const aTotalTime = aDockInTime + aLateness;
-    const bTotalTime = bDockInTime + bLateness;
-
-    const aWithinPromiseBuffer = (aPromiseTime - aTotalTime) <= 30;
-    const bWithinPromiseBuffer = (bPromiseTime - bTotalTime) <= 30;
-
-    if (aWithinPromiseBuffer && !bWithinPromiseBuffer) {
-      // A is within 30 mins of promise time, de-prioritize A
-      return 1;
-    }
-    if (!aWithinPromiseBuffer && bWithinPromiseBuffer) {
-      // B is within 30 mins of promise time, de-prioritize B
-      return -1;
-    }
-
-    if (aLateness > latenessBuffer && bLateness > latenessBuffer) {
-      // Both are delayed beyond the buffer, prioritize by promise time
-      return aPromiseTime - bPromiseTime;
-    }
+ 
 
     if (aLateness <= latenessBuffer && bLateness > latenessBuffer) {
-      // A is within buffer, B is late beyond buffer
       return -1;
     }
 
-    if (aLateness > latenessBuffer && bLateness <= latenessBuffer) {
-      // A is late beyond buffer, B is within buffer
+    else if (aLateness > latenessBuffer && bLateness <= latenessBuffer) {
       return 1;
     }
 
-    if (aLateness <= latenessBuffer && bLateness <= latenessBuffer) {
-      // Both are within buffer, prioritize by promise time
-      return aPromiseTime - bPromiseTime;
-    }
+    else if(((aPromiseTime-currentTime)>=0) && ( (aPromiseTime-currentTime)<=120))
+      return -1;
 
-    // Fallback to promise time
-    return aPromiseTime - bPromiseTime;
+    else if(((bPromiseTime-currentTime)>=0) && ( (bPromiseTime-currentTime)<=120))
+      return 1;
+  
+
+    return bPromiseTime-aPromiseTime;
   });
+
 
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
 }
+
+
+
+
 
 
 
