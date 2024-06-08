@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const { MongoClient, ServerApiVersion } = require('mongodb');
@@ -7,6 +8,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
+
 const { DateTime } = require('luxon'); 
 
 // origin: 'http://localhost:3000' ,
@@ -34,32 +36,16 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 5000;
 
-const uri = "mongodb+srv://dibyendubar1370:hello6buddy@cluster0.ccdmlvp.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0&&ssl=true";
+const uri = process.env.MONGODB_URI;
 
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
-const client = new MongoClient(uri, {
-  serverApi: {
-    version: ServerApiVersion.v1,
-    strict: true,
-    deprecationErrors: true,
-  }
-})
+const client = new MongoClient(uri);
 
-let db;
+const database=client.db('Docks');
+const db=database.collection('Docks');
 
-async function connectToDatabase() {
-  try {
-    await client.connect();
-    console.log('Connected to MongoDB Atlas!');
-    db = client.db('Docks');
-  } catch (e) {
-    console.error(e);
-    process.exit(1);
-  }
-}
 
-connectToDatabase()
 
 
 
@@ -389,7 +375,7 @@ app.post('/api/assign-dock', async (req, res) => {
     }
 
     try {
-      await db.collection('Docks').insertOne(newDock);
+      await db.insertOne(newDock);
       prioritizeDocks();
       io.emit('dockStatusUpdate', { docks, waitingVehicles });
       return res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
@@ -494,7 +480,7 @@ app.post('/api/release-dock', async(req, res) => {
   }
 
   try {
-    const updateResult = await db.collection("Docks").updateOne(
+    const updateResult = await db.updateOne(
       { vehicleNumber: dock.vehicleNumber }, // Filter by vehicleNumber
       { $set: { dockOutTime: dockOutTimeReadable } } // Update dockOutTime
     );
