@@ -241,6 +241,21 @@ function prioritizeWaitingVehicles() {
 
     const latenessBuffer = 30; // 30 minutes buffer
 
+    const aTotalTime = aDockInTime + aLateness;
+    const bTotalTime = bDockInTime + bLateness;
+
+    const aWithinPromiseBuffer = (aPromiseTime - aTotalTime) <= 30;
+    const bWithinPromiseBuffer = (bPromiseTime - bTotalTime) <= 30;
+
+    if (aWithinPromiseBuffer && !bWithinPromiseBuffer) {
+      // A is within 30 mins of promise time, de-prioritize A
+      return 1;
+    }
+    if (!aWithinPromiseBuffer && bWithinPromiseBuffer) {
+      // B is within 30 mins of promise time, de-prioritize B
+      return -1;
+    }
+
     if (aLateness > latenessBuffer && bLateness > latenessBuffer) {
       // Both are delayed beyond the buffer, prioritize by promise time
       return aPromiseTime - bPromiseTime;
@@ -267,9 +282,6 @@ function prioritizeWaitingVehicles() {
 
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
 }
-
-
-
 
 
 
