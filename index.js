@@ -8,6 +8,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
+const moment = require('moment');
 
 const { DateTime } = require('luxon'); 
 
@@ -204,69 +205,6 @@ function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
 }
 
 
-function prioritizeDocks() {
-  const currentTime = new Date().toLocaleTimeString('en-US', { hour12: false });
-  // console.log("Priorityyyyyyyyyyyy!")
-
-  docks.sort((a, b) => {
-    const isFRKorGGN_A = a.source === 'FRK' || a.source === 'GGN';
-    const isFRKorGGN_B = b.source === 'FRK' || b.source === 'GGN';
-
-    // Prioritize FRK and GGN sources first
-    if (isFRKorGGN_A && !isFRKorGGN_B) {
-      return -1;
-    }
-    if (!isFRKorGGN_A && isFRKorGGN_B) {
-      return 1;
-    }
-
-    const routeA = routeMaster.find(r => r.SMH === a.source);
-    const routeB = routeMaster.find(r => r.SMH === b.source);
-
-    if (!routeA || !routeB) {
-      return 0;
-    }
-
-    
-    // console.log(currentTime)
-    // console.log(routeA['dock in time'])
-    // console.log(routeB['dock in time'])
-
-    const currentTimeMinutes = timeToMinutes(currentTime);
-    const aDockInTime = timeToMinutes(routeA['dock in time']);
-    const bDockInTime = timeToMinutes(routeB['dock in time']);
-    const aLateness = currentTimeMinutes - aDockInTime;
-    const bLateness = currentTimeMinutes - bDockInTime;
-
-    const aPromiseTime = timeToMinutes(routeA['Promise']);
-    const bPromiseTime = timeToMinutes(routeB['Promise']);
-
-    if (aLateness > 30 && bLateness > 30) {
-      // Both are delayed, prioritize by promise time
-      return aPromiseTime - bPromiseTime;
-    }
-
-    if (aLateness <= 30 && bLateness > 30) {
-      // A is on time, B is late
-      return -1;
-    }
-
-    if (aLateness > 30 && bLateness <= 30) {
-      // A is late, B is on time
-      return 1;
-    }
-
-    if (aLateness <= 30 && bLateness <= 30) {
-      // Both are on time, prioritize by promise time
-      return aPromiseTime - bPromiseTime;
-    }
-
-    // Fallback to promise time
-    return aPromiseTime - bPromiseTime;
-  });
-
-  io.emit('dockStatusUpdate', { docks, waitingVehicles });
-}
 
 function prioritizeWaitingVehicles() {
   waitingVehicles.sort((a, b) => {
@@ -294,38 +232,37 @@ function prioritizeWaitingVehicles() {
     const aDockInTime = timeToMinutes(routeA['dock in time']);
     const bDockInTime = timeToMinutes(routeB['dock in time']);
 
-    const aLateness =   aDockInTime-currentTimeMinutes;
-    const bLateness = bDockInTime-currentTimeMinutes;
-
+    const aLateness = Math.abs(aDockInTime - currentTimeMinutes);
+    const bLateness = Math.abs(bDockInTime - currentTimeMinutes);
 
     const aPromiseTime = timeToMinutes(routeA['Promise']);
     const bPromiseTime = timeToMinutes(routeB['Promise']);
 
-    if (aLateness > 30 && bLateness > 30) {
-      // Both are delayed, prioritize by promise time
+    const latenessBuffer = 30; // 30 minutes buffer
+
+    if (aLateness > latenessBuffer && bLateness > latenessBuffer) {
+      // Both are delayed beyond the buffer, prioritize by promise time
       return aPromiseTime - bPromiseTime;
     }
 
-    if (aLateness <= 30 && bLateness > 30) {
-      // A is on time, B is late
+    if (aLateness <= latenessBuffer && bLateness > latenessBuffer) {
+      // A is within buffer, B is late beyond buffer
       return -1;
     }
 
-    if (aLateness > 30 && bLateness <= 30) {
-      // A is late, B is on time
+    if (aLateness > latenessBuffer && bLateness <= latenessBuffer) {
+      // A is late beyond buffer, B is within buffer
       return 1;
     }
 
-    if (aLateness <= 30 && bLateness <= 30) {
-      // Both are on time, prioritize by promise time
+    if (aLateness <= latenessBuffer && bLateness <= latenessBuffer) {
+      // Both are within buffer, prioritize by promise time
       return aPromiseTime - bPromiseTime;
     }
 
     // Fallback to promise time
     return aPromiseTime - bPromiseTime;
   });
-
-  // console.log(docks);
 
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
 }
@@ -334,21 +271,22 @@ function prioritizeWaitingVehicles() {
 
 
 
+
+
+
 app.post('/api/assign-dock', async (req, res) => {
   const { vehicleNumber, source, unloadingTime, is3PL } = req.body;
 
-
-
   console.log("In assign dock!");
 
-  if(docks.find(dock=>dock.vehicleNumber===vehicleNumber))
+  if (docks.find(dock => dock.vehicleNumber === vehicleNumber)) {
     return res.status(400).json({ message: 'Invalid Vehicle Number!' });
-
+  }
 
   let assignedDockNumber = null;
 
   // Check if there is an available dock
-  if (docks.some(dock =>( dock.status === 'available' && !dock.isDisabled) || (dock.source==='PH' && !dock.isDisabled) )) {
+  if (docks.some(dock => (dock.status === 'available' && !dock.isDisabled) || (dock.source === 'PH' && !dock.isDisabled))) {
     assignedDockNumber = assignDock({ vehicleNumber, source, unloadingTime, is3PL });
   }
 
@@ -358,18 +296,22 @@ app.post('/api/assign-dock', async (req, res) => {
 
     const currentTime = new Date();
     const addedTime = new Date(currentTime.getTime() + (5 * 60 + 30) * 60 * 1000);
-    const dockInTimeReadable = addedTime.toFormat('h:mm a, LL/dd/yyyy');
+    const dockInTimeReadable = moment(addedTime).format('h:mm a, MM/DD/YYYY');
+    console.log("Dock In:", dockInTimeReadable);
 
-    let newDock= {
+    let newDock = {
       vehicleNumber: vehicleNumber,
-      dockNumber:assignedDockNumber,
-      source:source,
-      dockInTime:dockInTimeReadable,
-      dockOutTime:null
-
-      
-      
+      dockNumber: assignedDockNumber,
+      source: source,
+      dockInTime: dockInTimeReadable,
+      dockOutTime: null
     };
+
+    // Emit the dock status update before the database operation
+    io.emit('dockStatusUpdate', { docks, waitingVehicles });
+
+    // Send response first
+    res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
 
     if (!db) {
       throw new Error('Database connection not established');
@@ -377,40 +319,25 @@ app.post('/api/assign-dock', async (req, res) => {
 
     try {
       await db.insertOne(newDock);
-      prioritizeDocks();
-      io.emit('dockStatusUpdate', { docks, waitingVehicles });
-      return res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
+      console.log('Document inserted successfully');
     } catch (err) {
       console.error('Error inserting document', err);
-      return res.status(500).json({ message: 'Internal Server Error' });
     }
-  
     
-    prioritizeDocks();
-    io.emit('dockStatusUpdate', { docks, waitingVehicles });
-    return res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
+    return;
   }
 
-  // console.log('I am here: No available dock, adding vehicle to waiting list');
-
   // If no available dock, add the vehicle to the waiting list
- 
-  
-  waitingVehicles.push({  vehicleNumber, source, unloadingTime, is3PL });
-
+  waitingVehicles.push({ vehicleNumber, source, unloadingTime, is3PL });
   prioritizeWaitingVehicles();
 
-  // console.log(waitingVehicles);
-
-  
+  // Emit the dock status update
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
 
- 
-
-
-  // If the vehicle couldn't be assigned immediately, it means all docks are currently occupied
+  // Send response
   return res.status(200).json({ message: 'All docks are full or the vehicle is late, added to waiting list' });
 });
+
 
 function assignWaitingVehiclesToDocks() {
   // Filter to find available docks
@@ -475,7 +402,8 @@ app.post('/api/release-dock', async(req, res) => {
  // Get the current time
  const currentTime = new Date();
  const addedTime = new Date(currentTime.getTime() + (5 * 60 + 30) * 60 * 1000);
- const dockOutTimeReadable = addedTime.toFormat('h:mm a, LL/dd/yyyy');
+ const dockOutTimeReadable = moment(addedTime).format('h:mm a, MM/DD/YYYY');
+ console.log("Dock out:",dockOutTimeReadable);
 
   if (!db) {
     throw new Error('Database connection not established');
