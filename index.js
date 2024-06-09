@@ -97,6 +97,24 @@ function timeToMinutes(time) {
   return hours * 60 + minutes + seconds / 60;
 }
 
+function getCurrentTimeInMinutes() {
+  const now = new Date();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const seconds = now.getSeconds();
+  return hours * 60 + minutes + seconds / 60;
+}
+
+function compareTimes(source, currentTime) {
+  const route = routeMaster.find(r => r.SMH === source);
+  if (!route) return true; // If source not in route master, assign dock immediately
+
+  const dockInMinutes = timeToMinutes(route['dock in time']);
+  const arrivalMinutes = getCurrentTimeInMinutes();
+
+  return arrivalMinutes <= dockInMinutes;
+}
+
 // Function to assign a dock without prioritizing waiting list
 function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
   let availableDock = null;
@@ -191,7 +209,9 @@ function assignDock({ vehicleNumber, source, unloadingTime, is3PL }) {
 
 
 function prioritizeWaitingVehicles() {
-
+  if (waitingVehicles.length === 2) {
+    console.log('Initial waitingVehicles:', JSON.stringify(waitingVehicles));
+  }
 
   waitingVehicles.sort((a, b) => {
     const currentTime = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -199,6 +219,12 @@ function prioritizeWaitingVehicles() {
 
     const isFRKorGGN_A = a.source === 'FRK' || a.source === 'GGN';
     const isFRKorGGN_B = b.source === 'FRK' || b.source === 'GGN';
+
+    if (waitingVehicles.length === 2) {
+      console.log('Comparing vehicles:', a, b);
+      console.log('Current time in minutes:', currentTimeMinutes);
+      console.log('isFRKorGGN_A:', isFRKorGGN_A, 'isFRKorGGN_B:', isFRKorGGN_B);
+    }
 
     // Prioritize FRK and GGN sources first
     if (isFRKorGGN_A && !isFRKorGGN_B) {
@@ -225,7 +251,14 @@ function prioritizeWaitingVehicles() {
     const bPromiseTime = timeToMinutes(routeB['Promise']);
 
     const latenessBuffer = 30; // 30 minutes buffer
-
+     console.log("A source:",a.source);
+     console.log("B source:",b.source);
+     console.log("A Dock In Time:",aDockInTime);
+     console.log("B Dock In Time:",bDockInTime);
+     console.log("A is late by",aLateness);
+     console.log("B is late by",bLateness);
+     console.log("Promise Time A:",aPromiseTime);
+     console.log("Promise Time B:",bPromiseTime);
  
 
     if (aLateness <= latenessBuffer && bLateness > latenessBuffer) {
@@ -243,9 +276,11 @@ function prioritizeWaitingVehicles() {
       return 1;
   
 
-    return bPromiseTime-aPromiseTime;
+
+    return aPromiseTime-bPromiseTime;
   });
 
+   console.log(waitingVehicles);
 
   io.emit('dockStatusUpdate', { docks, waitingVehicles });
 }
@@ -297,16 +332,16 @@ app.post('/api/assign-dock', async (req, res) => {
     // Send response first
     res.status(200).json({ message: `Dock ${assignedDockNumber} assigned to vehicle ${vehicleNumber}` });
 
-    if (!db) {
-      throw new Error('Database connection not established');
-    }
+    // if (!db) {
+    //   throw new Error('Database connection not established');
+    // }
 
-    try {
-      await db.insertOne(newDock);
-      console.log('Document inserted successfully');
-    } catch (err) {
-      console.error('Error inserting document', err);
-    }
+    // try {
+    //   await db.insertOne(newDock);
+    //   console.log('Document inserted successfully');
+    // } catch (err) {
+    //   console.error('Error inserting document', err);
+    // }
     
     return;
   }
@@ -389,22 +424,22 @@ app.post('/api/release-dock', async(req, res) => {
  const dockOutTimeReadable = moment(addedTime).format('h:mm a, MM/DD/YYYY');
  console.log("Dock out:",dockOutTimeReadable);
 
-  if (!db) {
-    throw new Error('Database connection not established');
-  }
+  // if (!db) {
+  //   throw new Error('Database connection not established');
+  // }
 
-  try {
-    const updateResult = await db.updateOne(
-      { vehicleNumber: dock.vehicleNumber }, // Filter by vehicleNumber
-      { $set: { dockOutTime: dockOutTimeReadable } } // Update dockOutTime
-    );
+  // try {
+  //   const updateResult = await db.updateOne(
+  //     { vehicleNumber: dock.vehicleNumber }, // Filter by vehicleNumber
+  //     { $set: { dockOutTime: dockOutTimeReadable } } // Update dockOutTime
+  //   );
 
-    console.log("Document updated successfully:", updateResult.modifiedCount);
+  //   console.log("Document updated successfully:", updateResult.modifiedCount);
     
-  } catch (err) {
-    console.error('Error updating document', err);
-    return res.status(500).json({ message: 'Internal Server Error' });
-  }
+  // } catch (err) {
+  //   console.error('Error updating document', err);
+  //   return res.status(500).json({ message: 'Internal Server Error' });
+  // }
 
   if (dock.status === 'occupied') {
       // Count the number of docks with the same dock number
